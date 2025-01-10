@@ -1,0 +1,22 @@
+﻿@page "/Projects"
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+
+@attribute [Authorize]
+
+<div class="d-flex">
+    <div class="w-50 pe-1">
+        <ProjectsTable OnProjectSelected="OnProjectSelected" />
+    </div>
+    <div class="w-50 ps-1">
+        <ProjectTasksTable @ref="ProjectTasksTable" />
+    </div>
+</div>
+
+@code {
+    ProjectTasksTable ProjectTasksTable = default!;
+    async Task OnProjectSelected(ViewProject project) => await ProjectTasksTable.SetProject(project);
+}

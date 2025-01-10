@@ -1,0 +1,87 @@
+﻿@using System.Security.Claims
+@using Donate.Components.Pages.Users
+@implements IDisposable
+@inject NavigationManager NavigationManager
+
+<nav class="navbar navbar-expand-lg bg-body-tertiary fixed-top shadow-sm">
+    <div class="container-fluid">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <a class="navbar-brand" href="/">Donation</a>
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <li class="nav-item"><NavLink class="nav-link" href="/Users">Users</NavLink></li>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView>
+                    <Authorized>
+                        <li class="nav-item"><NavLink class="nav-link" href="/Projects">Projects</NavLink></li>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                Donations
+                            </a>
+                            <ul class="dropdown-menu">
+                                <li><a class="dropdown-item" href="/Donations/Items">Donation Items</a></li>
+                                <li><a class="dropdown-item" href="/Donations/ItemTypes">Item Types</a></li>
+                                <li><hr class="dropdown-divider"></li>
+                            </ul>
+                        </li>
+                    </Authorized>
+                </AuthorizeView>
+            </ul>
+            <ul class="navbar-nav mb-2 mb-lg-0">
+                <AuthorizeView>
+                    <NotAuthorized>
+                        <li class="nav-item"><NavLink class="nav-link" href="Users/Login">Login</NavLink></li>
+                        <li class="nav-item"><NavLink class="nav-link" href="Users/Register">Register</NavLink></li>
+                    </NotAuthorized>
+                    <Authorized>
+                        <li class="nav-item"><NavLink class="nav-link" href="#">@context.User.Identity?.Name</NavLink></li>
+                        <li class="nav-item">
+                            <form action="Users/Logout" method="post">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                                <button type="submit" class="nav-link">
+                                    <span class="bi bi-arrow-bar-left-nav-menu" aria-hidden="true"></span> Logout
+                                </button>
+                            </form>
+                        </li>
+                    </Authorized>
+                </AuthorizeView>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = default!;
+
+    private string? currentUrl;
+    private ClaimsPrincipal User = default!;
+
+    protected override async void OnInitialized()
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+        var auth = await Auth.GetAuthenticationStateAsync();
+        User = auth.User;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

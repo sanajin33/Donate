@@ -1,0 +1,38 @@
+﻿@using Microsoft.AspNetCore.Identity
+@using Donate.Data;
+
+
+@inject SignInManager<AppUser> SignInManager
+
+<ul class="nav nav-pills flex-column">
+    <li class="nav-item">
+        <NavLink class="nav-link" href="Users/Manage" Match="NavLinkMatch.All">Profile</NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link" href="Users/Manage/Email">Email</NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link" href="Users/Manage/ChangePassword">Password</NavLink>
+    </li>
+    @if (hasExternalLogins)
+    {
+        <li class="nav-item">
+            <NavLink class="nav-link" href="Users/Manage/ExternalLogins">External logins</NavLink>
+        </li>
+    }
+    <li class="nav-item">
+        <NavLink class="nav-link" href="Users/Manage/TwoFactorAuthentication">Two-factor authentication</NavLink>
+    </li>
+    <li class="nav-item">
+        <NavLink class="nav-link" href="Users/Manage/PersonalData">Personal data</NavLink>
+    </li>
+</ul>
+
+@code {
+    private bool hasExternalLogins;
+
+    protected override async Task OnInitializedAsync()
+    {
+        hasExternalLogins = (await SignInManager.GetExternalAuthenticationSchemesAsync()).Any();
+    }
+}

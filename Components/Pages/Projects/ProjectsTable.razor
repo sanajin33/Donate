@@ -1,0 +1,193 @@
+﻿@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+
+<div class="header mb-3">
+    <h1 class="header-title">Projects list</h1>
+    <div class="header-btns">
+        <AuthorizeView Roles="Admin">
+            <Authorized>
+                <button class="btn btn-link me-1" @onclick="OnStateChanged">
+                    @if (showDisactive)
+                    {
+                        <span class="text-success"><i class="fa-solid fa-eye fa-xl"></i></span>
+                    }
+                    else
+                    {
+                        <span class="text-muted"><i class="fa-solid fa-eye-slash fa-xl"></i></span>
+                    }
+                </button>
+            </Authorized>
+        </AuthorizeView>
+        <button class="btn btn-primary me-1" @onclick="Refresh"><i class="fa-solid fa-rotate"></i></button>
+        <AuthorizeView Roles="Admin">
+            <Authorized>
+                <button class="btn btn-success" @onclick="NewProject"><i class="fa-solid fa-plus"></i></button>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+</div>
+
+<RadzenDataGrid @ref="DG" AllowFiltering="true" AllowAlternatingRows="true" FilterMode="FilterMode.Simple" AllowSorting="true" PageSize="20" AllowPaging="true" PagerHorizontalAlign="HorizontalAlign.Center" ShowPagingSummary="true"
+                Data="@projects" @bind-Value=@selectedProjects LoadData="LoadData" IsLoading="isLoading" RowSelect="OnProjectSelected" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Count="@count" ColumnWidth="300px" LogicalFilterOperator="LogicalFilterOperator.Or" SelectionMode="DataGridSelectionMode.Single">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(ViewProject.Organization)" Title="Organization" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewProject.Title)" Title="Name" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewProject.Description)" Title="Description" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewProject.StartDate)" Title="Start date" Width="auto" TextAlign="TextAlign.Center">
+            <Template Context="project">
+                @if (project.StartDate.HasValue)
+                {
+                    @($"{project.StartDate.Value:yyyy/MM/dd}")
+                }
+                else
+                {
+                    <span>-</span>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(ViewProject.EndDate)" Title="End date" Width="auto" TextAlign="TextAlign.Center">
+            <Template Context="project">
+                @if (project.EndDate.HasValue)
+                {
+                    @($"{project.EndDate.Value:yyyy/MM/dd}")
+                }
+                else
+                {
+                    <span>-</span>
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(ViewProject.Status)" Title="Status" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Filterable="false" Sortable="false" Width="90px" TextAlign="TextAlign.Center">
+            <Template Context="project">
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <div Class="text-nowrap text-center">
+                            @if (project.Active == true)
+                            {
+                                <button class="btn btn-link text-primary btn-sm small px-1 py-0 me-2" @onclick="@(async() => await EditProject(project))" title="Update"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button class="btn btn-link text-muted btn-sm px-1 py-0 small" @onclick="@(async() => await DisActive(project))" title="Disactive"><i class="fa-regular fa-square"></i></button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-link text-success btn-sm px-1 py-0 small" @onclick="@(async() => await Active(project))" title="Active"><i class="fa-regular fa-square-check"></i></button>
+                            }
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = default!;
+    [Parameter] public EventCallback<ViewProject> OnProjectSelected { get; set; }
+    List<ViewProject> projects = [];
+    IList<ViewProject> selectedProjects = [];
+    private ClaimsPrincipal CurUser = default!;
+    private RadzenDataGrid<ViewProject> DG = default!;
+    bool isLoading;
+    int count;
+    bool showDisactive;
+    ClaimsPrincipal? User;
+
+    override protected async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+
+        var auth = await Auth.GetAuthenticationStateAsync();
+        CurUser = auth.User;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await DG.Reload();
+    }
+
+    async Task LoadData(LoadDataArgs args)
+    {
+        isLoading = true;
+
+        await Task.Yield();
+
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var query = db.ViewProjects.Where(x => showDisactive || (showDisactive || x.Active == true)).AsQueryable();
+
+        if (!string.IsNullOrEmpty(args.Filter))
+            query = query.Where(args.Filter);
+
+        if (!string.IsNullOrEmpty(args.OrderBy))
+            query = query.OrderBy(args.OrderBy);
+
+        count = query.Count();
+
+        projects = query.Skip(args.Skip!.Value).Take(args.Top!.Value).ToList();
+
+        if (projects.Count > 0 && selectedProjects.Count == 0)
+        {
+            selectedProjects = new List<ViewProject> { projects.First() };
+            await OnProjectSelected.InvokeAsync(projects.First());
+        }
+
+        isLoading = false;
+    }
+
+    async Task Refresh() => await DG.Reload();
+
+    async Task NewProject()
+    {
+        var modal = Modal.Show<ProjectModal>("New project", new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            ToastSrv.ShowSuccess($"A new project has added.");
+            await Refresh();
+        }
+    }
+
+    async Task EditProject(ViewProject project)
+    {
+        var parameters = new ModalParameters() { { nameof(ProjectModal.Project), new Project { Id = project.Id } } };
+        var modal = Modal.Show<ProjectModal>("Update project", parameters, new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large, });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            if (result.Data?.ToString() == "NotFound")
+                ToastSrv.ShowInfo("This project is not found.");
+
+            ToastSrv.ShowSuccess($"This project has updated.");
+            await Refresh();
+        }
+    }
+
+    async Task DisActive(ViewProject project) => await UserActive(project, false);
+    async Task Active(ViewProject project) => await UserActive(project, true);
+
+    async Task UserActive(ViewProject project, bool state)
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var userInDb = await db.Projects.FirstOrDefaultAsync(x => x.Id == project.Id);
+        if (userInDb == null)
+            ToastSrv.ShowInfo("This project is not found.");
+        else
+        {
+            userInDb.Active = state;
+            db.Projects.Update(userInDb);
+            await db.SaveChangesAsync();
+            ToastSrv.ShowSuccess($"This project has {(state ? "activated" : "disactivated")}.");
+        }
+
+        await Refresh();
+    }
+
+    async Task OnStateChanged()
+    {
+        showDisactive = !showDisactive;
+        await DG.Reload();
+    }
+}

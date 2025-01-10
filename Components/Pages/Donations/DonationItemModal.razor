@@ -1,0 +1,126 @@
+﻿@using Donate.Components.Pages.Projects
+@using Donate.Components.Pages.Users
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@using System.Text
+@using System.Text.Encodings.Web
+@inject NavigationManager NavigationManager
+
+<EditForm Model="_Item" OnvalidSubmit="OnSave">
+    <DataAnnotationsValidator />
+    <FormValidation @ref="FormValidation" />
+
+    <div class="row mb-3">
+        <div class="col-12 col-md-6">
+            <label for="Input.Project" class="mb-2 text-muted">Project</label>
+            <SelectProject @bind-Value="_Item.ProjectId" ID="Input.Project" />
+            <ValidationMessage For="@(() => _Item.ProjectId)" />
+        </div>
+
+        <div class="col-12 col-md-6">
+            <label for="Input.ItemtypeId" class="mb-2 text-muted">Item Type</label>
+            <SelectItemType @bind-Value="_Item.ItemTypeId" ID="Input.ItemtypeId" />
+            <ValidationMessage For="() => _Item.ItemTypeId" />
+        </div>
+    </div>
+
+    <div class="row mb-3">
+        <div class="col-12 col-md-6">
+            <label for="Input.ItemName" class="mb-2 text-muted">Name</label>
+            <InputText @bind-Value="_Item.ItemName" id="Input.ItemName" class="form-control" aria-required="true" />
+            <ValidationMessage For="() => _Item.ItemName" />
+        </div>
+        <div class="col-12 col-md-6">
+            <label for="Input.Price" class="mb-2 text-muted">Price</label>
+            <InputNumber TValue="decimal" @bind-Value="_Item.Price" id="Input.Price" class="form-control" aria-required="true" />
+            <ValidationMessage For="() => _Item.Price" />
+        </div>
+    </div>
+
+    <div class="align-items-center d-flex">
+        <button type="submit" class="btn btn-primary mx-auto px-5">@(_Item.Id == 0 ? "Add" : "Update")</button>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter] public DonationItem Item { get; set; } = new();
+    [CascadingParameter] public BlazoredModalInstance ModalInstance { get; set; } = default!;
+    private DonationItem _Item = new();
+    FormValidation FormValidation = default!;
+
+    protected override async void OnInitialized()
+    {
+        if (Item.Id > 0)
+        {
+            using var db = await ContextFactory.CreateDbContextAsync();
+            var task = await db.DonationItems.FirstOrDefaultAsync(x => x.Id == Item.Id);
+            if (task == null)
+            {
+                await ModalInstance.CloseAsync(ModalResult.Cancel("NotFound"));
+                return;
+            }
+            else
+            {
+                Item = task.Clone<DonationItem>()!;
+            }
+        }
+
+        _Item = Item.Clone()!;
+
+        StateHasChanged();
+    }
+
+    async Task OnSave()
+    {
+        var errors = new Dictionary<string, List<string>>();
+        FormValidation.ClearErrors();
+
+        using var db = await ContextFactory.CreateDbContextAsync();
+
+        try
+        {
+            if (_Item.Id == 0)
+            {
+                var newItem = new DonationItem
+                    {
+                        ProjectId = _Item.ProjectId,
+                        ItemTypeId = _Item.ItemTypeId,
+                        ItemName = _Item.ItemName.Trim(),
+                        Price = _Item.Price,
+                    };
+                await db.DonationItems.AddAsync(newItem);
+                await db.SaveChangesAsync();
+
+                await ModalInstance.CloseAsync(ModalResult.Ok());
+            }
+            else
+            {
+                var itemInDb = await db.DonationItems.FirstOrDefaultAsync(x => x.Id == _Item.Id);
+                if (itemInDb == null)
+                {
+                    await ModalInstance.CloseAsync(ModalResult.Cancel("NotFound"));
+                    return;
+                }
+                else
+                {
+                    itemInDb.ProjectId = _Item.ProjectId;
+                    itemInDb.ItemTypeId = _Item.ItemTypeId;
+                    itemInDb.ItemName = _Item.ItemName.Trim();
+                    itemInDb.Price = _Item.Price;
+
+                    db.DonationItems.Update(itemInDb);
+                    await db.SaveChangesAsync();
+
+                    await ModalInstance.CloseAsync(ModalResult.Ok());
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastSrv.ShowError(ex.Message);
+        }
+    }
+}

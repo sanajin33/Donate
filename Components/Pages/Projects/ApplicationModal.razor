@@ -1,0 +1,91 @@
+﻿@using Donate.Components.Pages.Users
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.EntityFrameworkCore
+@using System.Text.Json
+@using System.Text
+@using System.Text.Encodings.Web
+@using System.Security.Claims
+@inject IJSRuntime JS
+
+<table class="table table-bordered table-striped">
+    <tr>
+        <th>Volunteer</th>
+        <th>Date</th>
+        <th></th>
+    </tr>
+    @foreach (var item in applications)
+    {
+        <tr>
+            <td>@item.Volunteer!.Name</td>
+            <td>@item.StartDate.ToLocalTime()</td>
+            <td>
+                <button class="btn btn-link text-success btn-sm me-2" @onclick="@(() => OnApprove(item))">Approve</button>
+                <button class="btn btn-link text-danger btn-sm" @onclick="@(() => OnRegict(item))">Regict</button>
+            </td>
+        </tr>
+    }
+</table>
+
+<button class="btn btn-primary w-100" @onclick="Close">Close</button>
+
+@code {
+    [Parameter] public ViewProjectTask ProjectTask { get; set; } = new();
+    [CascadingParameter] public BlazoredModalInstance ModalInstance { get; set; } = default!;
+    FormValidation FormValidation = default!;
+    private ClaimsPrincipal CurUser = default!;
+    TaskApplication[] applications = [];
+
+    protected override async void OnInitialized()
+    {
+        var auth = await Auth.GetAuthenticationStateAsync();
+        CurUser = auth.User;
+
+        await Fill();
+    }
+
+    async Task Fill()
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        applications = await db.TaskApplications.Include(x => x.Volunteer).Where(x => x.ProjectTaskId == ProjectTask.Id && x.Status == ApplicationStatus.Pending).ToArrayAsync();
+        StateHasChanged();
+    }
+
+    async Task OnApprove(TaskApplication task)
+    {
+        if (await JS.InvokeAsync<string>("confermMessage", $"Do you want to approve the application on this task?") == "Yes")
+        {
+            using var db = await ContextFactory.CreateDbContextAsync();
+            task.Status = ApplicationStatus.Approved;
+            db.TaskApplications.Update(task);
+            await db.SaveChangesAsync();
+
+            var VoluteerProjectTask = new VolunteerProjectTask
+                {
+                    ProjectTaskId = task.ProjectTaskId,
+                    VolunteerId = CurUser.Id()
+                };
+            await db.VolunteerProjectTasks.AddAsync(VoluteerProjectTask);
+            await db.SaveChangesAsync();
+
+            await Fill();
+            if (applications.Length == 0) await Close();
+        }
+    }
+
+    async Task OnRegict(TaskApplication task)
+    {
+        if (await JS.InvokeAsync<string>("confermMessage", $"Do you want to regict the application on this task?") == "Yes")
+        {
+            using var db = await ContextFactory.CreateDbContextAsync();
+            task.Status = ApplicationStatus.Rejected;
+            db.TaskApplications.Update(task);
+            await db.SaveChangesAsync();
+            await Fill();
+            if (applications.Length == 0) await Close();
+        }
+    }
+
+    async Task Close() => await ModalInstance.CloseAsync();
+}

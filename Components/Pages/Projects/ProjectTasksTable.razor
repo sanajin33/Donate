@@ -1,0 +1,253 @@
+﻿@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+@inject IJSRuntime JS
+
+<div class="header mb-3">
+    <h1 class="header-title">Tasks list</h1>
+    <div class="header-btns">
+        @if (Project != null)
+        {
+            <AuthorizeView Roles="Admin">
+                <Authorized>
+                    <button class="btn btn-link me-1" @onclick="OnStateChanged">
+                        @if (showDisactive)
+                        {
+                            <span class="text-success"><i class="fa-solid fa-eye fa-xl"></i></span>
+                        }
+                        else
+                        {
+                            <span class="text-muted"><i class="fa-solid fa-eye-slash fa-xl"></i></span>
+                        }
+                    </button>
+                </Authorized>
+            </AuthorizeView>
+            <button class="btn btn-primary me-1" @onclick="Refresh"><i class="fa-solid fa-rotate"></i></button>
+            <AuthorizeView Roles="Admin">
+                <Authorized>
+                    <button class="btn btn-success" @onclick="NewProject"><i class="fa-solid fa-plus"></i></button>
+                </Authorized>
+            </AuthorizeView>
+        }
+    </div>
+</div>
+
+<RadzenDataGrid @ref="DG" AllowFiltering="true" AllowAlternatingRows="true" FilterMode="FilterMode.Simple" AllowSorting="true" PageSize="20" AllowPaging="true" PagerHorizontalAlign="HorizontalAlign.Center" ShowPagingSummary="true"
+                Data="@projects" @bind-Value=@selectedProjects LoadData="LoadData" IsLoading="isLoading" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Count="@count" ColumnWidth="300px" LogicalFilterOperator="LogicalFilterOperator.Or" SelectionMode="DataGridSelectionMode.Single">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(ViewProjectTask.Description)" Title="Description" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewProjectTask.WantedCount)" Title="Wanted Count" Width="auto" TextAlign="TextAlign.Center">
+            <Template Context="task">@task.WantedCount @(task.ApprovedApplicationCount > 0 ? $" / {task.ApprovedApplicationCount}" : null)</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(ViewProjectTask.Date)" Title="Date" Width="auto" TextAlign="TextAlign.Center">
+            <Template Context="task">@($"{task.Date:yyyy/MM/dd}")</Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(ViewProject.Status)" Title="Status" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Filterable="false" Sortable="false" Width="auto" TextAlign="TextAlign.Right">
+            <Template Context="task">
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <div Class="text-nowrap text-right">
+                            @if (task.Active == true)
+                            {
+                                @if (task.Applications.Length > 0)
+                                {
+                                    <button class="btn btn-link text-primary position-relative me-2" title="@(task.Applications.Length) Pending applications" @onclick="@(() => ApproveApplication(task))">
+                                        <i class="fa-solid fa-list-ol"></i>
+                                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="left: 35px !important;top: 10px !important;">
+                                            @task.Applications.Length
+                                            <span class="visually-hidden">unread messages</span>
+                                        </span>
+                                    </button>
+                                }
+                                <button class="btn btn-link text-primary btn-sm small px-1 py-0 me-2" @onclick="@(async() => await EditProject(task))" title="Update"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button class="btn btn-link text-muted btn-sm px-1 py-0 small" @onclick="@(async() => await DisActive(task))" title="Disactive"><i class="fa-regular fa-square"></i></button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-link text-success btn-sm px-1 py-0 small" @onclick="@(async() => await Active(task))" title="Active"><i class="fa-regular fa-square-check"></i></button>
+                            }
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView Roles="Volunteer">
+                    <Authorized>
+                        @if (IsUserAddedApp(task))
+                        {
+                            <button class="btn btn-link text-primary btn-sm px-1 py-0 small" @onclick="@(async() => await RemoveApplication(task))" title="Remove an application from work on this task"><i class="fa-solid fa-thumbtack"></i></button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-link text-muted opacity-50 btn-sm px-1 py-0 small" @onclick="@(async() => await AddApplication(task))" title="Add an application to work on this task"><i class="fa-solid fa-thumbtack"></i></button>
+                        }
+                    </Authorized>
+                </AuthorizeView>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = default!;
+    List<ViewProjectTask> projects = [];
+    IList<ViewProjectTask> selectedProjects = [];
+    private ClaimsPrincipal CurUser = default!;
+    private RadzenDataGrid<ViewProjectTask> DG = default!;
+    bool isLoading;
+    int count;
+    bool showDisactive;
+    ViewProject? Project;
+    bool IsUserAddedApp(ViewProjectTask task) =>
+            !string.IsNullOrWhiteSpace(task.VolunteerIds) && CurUser != null && task.VolunteerIds.Split(", ").Contains(CurUser.Id().ToString());
+
+    override protected async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+
+        var auth = await Auth.GetAuthenticationStateAsync();
+        CurUser = auth.User;
+    }
+
+    // protected override async Task OnAfterRenderAsync(bool firstRender)
+    // {
+    //     if (firstRender)
+    //         await DG.Reload();
+    // }
+
+    public async Task SetProject(ViewProject project)
+    {
+        Project = project;
+        await DG.Reload();
+    }
+
+    async Task LoadData(LoadDataArgs args)
+    {
+        if (Project != null)
+        {
+            isLoading = true;
+
+            await Task.Yield();
+
+            using var db = await ContextFactory.CreateDbContextAsync();
+            var query = db.ViewProjectTasks.Where(x => x.ProjectId == Project.Id && (showDisactive || x.Active == true)).AsQueryable();
+
+            if (!string.IsNullOrEmpty(args.Filter))
+                query = query.Where(args.Filter);
+
+            if (!string.IsNullOrEmpty(args.OrderBy))
+                query = query.OrderBy(args.OrderBy);
+
+            count = query.Count();
+
+            projects = query.Skip(args.Skip!.Value).Take(args.Top!.Value).ToList();
+
+            var ids = projects.Where(x => !string.IsNullOrWhiteSpace(x.VolunteerIds)).SelectMany(x => x.VolunteerIds!.Split(", "));
+            var apps = await db.Users.Where(x => ids.Contains(x.Id.ToString())).ToArrayAsync();
+
+            projects.ForEach(x => x.Applications = apps.Where(y => !string.IsNullOrWhiteSpace(x.VolunteerIds) && x.VolunteerIds!.Split(", ").Contains(y.Id.ToString())).ToArray());
+
+            isLoading = false;
+        }
+    }
+
+    async Task Refresh() => await DG.Reload();
+
+    async Task NewProject()
+    {
+        var parameters = new ModalParameters() { { nameof(ProjectTaskModal.Task), new ProjectTask { ProjectId = Project!.Id } } };
+        var modal = Modal.Show<ProjectTaskModal>("New Task", parameters, new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            ToastSrv.ShowSuccess($"A new task has added.");
+            await Refresh();
+        }
+    }
+
+    async Task EditProject(ViewProjectTask task)
+    {
+        var parameters = new ModalParameters() { { nameof(ProjectTaskModal.Task), new ProjectTask { Id = task.Id } } };
+        var modal = Modal.Show<ProjectTaskModal>("Update Task", parameters, new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large, });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            if (result.Data?.ToString() == "NotFound")
+                ToastSrv.ShowInfo("This task is not found.");
+
+            ToastSrv.ShowSuccess($"This task has updated.");
+            await Refresh();
+        }
+    }
+
+    async Task DisActive(ViewProjectTask project) => await UserActive(project, false);
+    async Task Active(ViewProjectTask project) => await UserActive(project, true);
+
+    async Task UserActive(ViewProjectTask project, bool state)
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var userInDb = await db.Tasks.FirstOrDefaultAsync(x => x.Id == project.Id);
+        if (userInDb == null)
+            ToastSrv.ShowInfo("This task is not found.");
+        else
+        {
+            userInDb.Active = state;
+            db.Tasks.Update(userInDb);
+            await db.SaveChangesAsync();
+            ToastSrv.ShowSuccess($"This task has {(state ? "activated" : "disactivated")}.");
+        }
+
+        await Refresh();
+    }
+
+    async Task OnStateChanged()
+    {
+        showDisactive = !showDisactive;
+        await DG.Reload();
+    }
+
+    async Task AddApplication(ViewProjectTask task)
+    {
+        if (await JS.InvokeAsync<string>("confermMessage", "Do you want to work on this task?") == "Yes")
+        {
+            using var db = await ContextFactory.CreateDbContextAsync();
+            var taskApplication = new TaskApplication
+                {
+                    ProjectTaskId = task.Id,
+                    VolunteerId = CurUser.Id(),
+                    StartDate = DateTime.UtcNow,
+                    Status = ApplicationStatus.Pending,
+                };
+            await db.TaskApplications.AddAsync(taskApplication);
+            await db.SaveChangesAsync();
+            ToastSrv.ShowSuccess($"A new application has added.");
+            await DG.Reload();
+        }
+    }
+
+    async Task RemoveApplication(ViewProjectTask task)
+    {
+        if (await JS.InvokeAsync<string>("confermMessage", $"Do you want to REMOVE the application on this task?") == "Yes")
+        {
+            using var db = await ContextFactory.CreateDbContextAsync();
+            var ta = await db.TaskApplications.FirstOrDefaultAsync(x => x.VolunteerId == CurUser.Id() && x.ProjectTaskId == task.Id && x.Status == ApplicationStatus.Pending);
+            if (ta != null)
+            {
+                ta.Status = ApplicationStatus.Rejected;
+                db.TaskApplications.Update(ta);
+                await db.SaveChangesAsync();
+                ToastSrv.ShowSuccess($"The application has regicted.");
+                await DG.Reload();
+            }
+        }
+    }
+
+    async Task ApproveApplication(ViewProjectTask task)
+    {
+        var parameter = new ModalParameters { { nameof(ApplicationModal.ProjectTask), task } };
+        var modal = Modal.Show<ApplicationModal>("Approve application", parameter, new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large });
+        var result = await modal.Result;
+        await DG.Reload();
+    }
+}

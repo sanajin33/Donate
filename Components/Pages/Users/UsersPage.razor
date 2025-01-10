@@ -1,0 +1,160 @@
+﻿@page "/Users"
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+
+@attribute [Authorize(Roles = "Admin")]
+
+<div class="header mb-3">
+    <h1 class="header-title">Users list</h1>
+    <div class="header-btns">
+        <button class="btn btn-link me-1" @onclick="OnStateChanged">
+            @if (showDisactive)
+            {
+                <span class="text-success"><i class="fa-solid fa-eye fa-xl"></i></span>
+            }
+            else
+            {
+                <span class="text-muted"><i class="fa-solid fa-eye-slash fa-xl"></i></span>
+            }
+        </button>
+        <button class="btn btn-primary me-1" @onclick="Refresh"><i class="fa-solid fa-rotate"></i></button>
+        <button class="btn btn-success" @onclick="NewUser"><i class="fa-solid fa-plus"></i></button>
+    </div>
+</div>
+
+<RadzenDataGrid @ref="DG" AllowFiltering="true" AllowAlternatingRows="true" FilterMode="FilterMode.Simple" AllowSorting="true" PageSize="20" AllowPaging="true" PagerHorizontalAlign="HorizontalAlign.Center" ShowPagingSummary="true"
+                Data="@users" @bind-Value=@selectedUsers LoadData="LoadData" IsLoading="isLoading" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Count="@count" ColumnWidth="300px" LogicalFilterOperator="LogicalFilterOperator.Or" SelectionMode="DataGridSelectionMode.Single">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(ViewUser.Name)" Title="Name" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewUser.Email)" Title="Email" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Property="@nameof(ViewUser.PhoneNumber)" Title="Phone number" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Property="@nameof(ViewUser.Role)" Title="Type" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Filterable="false" Sortable="false" Width="90px" TextAlign="TextAlign.Center">
+            <Template Context="user">
+                <div Class="text-nowrap text-center">
+                    @if (user.Active == true)
+                    {
+                        <button class="btn btn-link text-primary btn-sm small px-1 py-0 me-2" @onclick="@(async() => await EditUser(user))" title="Update"><i class="fa-solid fa-pen-to-square"></i></button>
+                        @if (users.Count(x => x.Role == "Admin") > 1 || user.Role != "Admin")
+                        {
+                            <button class="btn btn-link text-muted btn-sm px-1 py-0 small" @onclick="@(async() => await DisActive(user))" title="Disactive"><i class="fa-regular fa-square"></i></button>
+                        }
+                    }
+                    else
+                    {
+                        <button class="btn btn-link text-success btn-sm px-1 py-0 small" @onclick="@(async() => await Active(user))" title="Active"><i class="fa-regular fa-square-check"></i></button>
+                    }
+                </div>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = default!;
+    List<ViewUser> users = [];
+    IList<ViewUser> selectedUsers = [];
+    private ClaimsPrincipal CurUser = default!;
+    private RadzenDataGrid<ViewUser> DG = default!;
+    bool isLoading;
+    int count;
+    bool showDisactive;
+
+    override protected async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+
+        var auth = await Auth.GetAuthenticationStateAsync();
+        CurUser = auth.User;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await DG.Reload();
+    }
+
+    async Task LoadData(LoadDataArgs args)
+    {
+        isLoading = true;
+
+        await Task.Yield();
+
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var query = db.ViewUsers.Where(x => showDisactive || x.Active == true).AsQueryable();
+
+        if (!string.IsNullOrEmpty(args.Filter))
+            query = query.Where(args.Filter);
+
+        if (!string.IsNullOrEmpty(args.OrderBy))
+            query = query.OrderBy(args.OrderBy);
+
+        count = query.Count();
+
+        users = query.Skip(args.Skip!.Value).Take(args.Top!.Value).ToList();
+
+        isLoading = false;
+    }
+
+    async Task Refresh() => await DG.Reload();
+
+    async Task NewUser()
+    {
+        var modal = Modal.Show<UserModal>("New user", new ModalOptions { DisableBackgroundCancel = false, });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            ToastSrv.ShowSuccess($"A new user has added.");
+            await Refresh();
+        }
+    }
+
+    async Task EditUser(ViewUser user)
+    {
+        var parameters = new ModalParameters() { { nameof(UserModal.User), new RegisterModel { Id = user.Id, } } };
+        var modal = Modal.Show<UserModal>("Update user", parameters, new ModalOptions { DisableBackgroundCancel = false, });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            if (result.Data?.ToString() == "NotFound")
+                ToastSrv.ShowInfo("This user is not found.");
+
+            ToastSrv.ShowSuccess($"This user has updated.");
+            await Refresh();
+        }
+    }
+
+    async Task DisActive(ViewUser user) => await UserActive(user, false);
+    async Task Active(ViewUser user) => await UserActive(user, true);
+
+    async Task UserActive(ViewUser user, bool state)
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var userInDb = await db.Users.FirstOrDefaultAsync(x => x.Id == user.Id);
+        if (userInDb == null)
+            ToastSrv.ShowInfo("This user is not found.");
+        else
+        {
+            if (await db.Users.AnyAsync(x => x.Active == true && x.Email == user.Email && x.Id != user.Id))
+                ToastSrv.ShowError("Email already exists.");
+            else
+            {
+                userInDb.Active = state;
+                db.Users.Update(userInDb);
+                await db.SaveChangesAsync();
+                ToastSrv.ShowSuccess($"This user has {(state ? "activated" : "disactivated")}.");
+            }
+        }
+
+        await Refresh();
+    }
+
+    async Task OnStateChanged()
+    {
+        showDisactive = !showDisactive;
+        await DG.Reload();
+    }
+}

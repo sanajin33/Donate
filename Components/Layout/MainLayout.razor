@@ -1,0 +1,24 @@
+﻿@using Blazored.Toast.Configuration
+@inherits LayoutComponentBase
+
+<RadzenComponents @rendermode="RenderMode.InteractiveServer" />
+<BlazoredToasts Position="ToastPosition.BottomRight"
+                Timeout="10"
+                PauseProgressOnHover="true"
+                ShowProgressBar="true"
+                IconType="IconType.FontAwesome"
+                SuccessClass="success-toast-override"
+                SuccessIcon="fa fa-thumbs-up"
+                ErrorIcon="fa fa-bug" />
+
+<Topbar />
+
+<main class="p-3" style="margin-top: 56px;">
+    @Body
+</main>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>

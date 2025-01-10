@@ -1,0 +1,194 @@
+﻿@page "/Users/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using Donate.Components.Pages.Users
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using Donate.Data
+
+@inject UserManager<AppUser> UserManager
+@inject IUserStore<AppUser> UserStore
+@inject SignInManager<AppUser> SignInManager
+@inject IEmailSender<AppUser> EmailSender
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Register</PageTitle>
+
+<section class="d-flex align-items-center" style="height: calc(100vh - 88px);">
+    <div class="card col-12 col-sm-8 col-md-7 col-lg-6 col-xl-5 shadow mx-auto">
+        <div class="card-body">
+            <h1 class="fs-4">Log in</h1>
+            <div class="row">
+                <EditForm Model="Input" asp-route-returnUrl="@ReturnUrl" method="post" OnValidSubmit="RegisterUser" FormName="register" class="p-3">
+                    <DataAnnotationsValidator />
+
+                    <div class="row mb-3">
+                        <div class="col-12 col-md-6">
+                            <label for="Input.Email" class="mb-2 text-muted">Name</label>
+                            <InputText @bind-Value="Input.Name" id="Input.Name" class="form-control" autocomplete="fullname" aria-required="true" placeholder="John Smith" autofocus />
+                            <ValidationMessage For="() => Input.Name" />
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="Input.Type" class="mb-2 text-muted">Type</label>
+                            <SelectRole @bind-Value="Role" ID="Input.Role" />
+                            <ValidationMessage For="() => Role" />
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12 col-md-6">
+                            <label for="Input.Email" class="mb-2 text-muted">Email</label>
+                            <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="email" aria-required="true" placeholder="name@example.com" />
+                            <ValidationMessage For="() => Input.Email" />
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="Input.PhoneNumber" class="mb-2 text-muted">Phone</label>
+                            <InputText @bind-Value="Input.PhoneNumber" id="Input.PhoneNumber" class="form-control" aria-required="true" />
+                            <ValidationMessage For="() => Input.PhoneNumber" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="Input.Address" class="mb-2 text-muted">Address</label>
+                        <InputTextArea @bind-Value="Input.Address" id="Input.Address" class="form-control" placeholder="Address here..." rows="5" />
+                        <ValidationMessage For="() => Input.Address" />
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-12 col-md-6">
+                            <label for="Input.Password" class="mb-2 text-muted">Password</label>
+                            <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" />
+                            <ValidationMessage For="() => Input.Password" />
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label for="Input.ConfirmPassword" class="mb-2 text-muted">Confirm Password</label>
+                            <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword" class="form-control" />
+                            <ValidationMessage For="() => Input.ConfirmPassword" />
+                        </div>
+                    </div>
+
+                    <p class="form-text text-muted mb-3">
+                        By registering you agree with our terms and condition.
+                    </p>
+
+                    <div class="align-items-center d-flex">
+                        <button type="submit" class="btn btn-primary ms-auto">Register</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+        <div class="card-footer">
+            <div class="bg-light text-center px-3 py-2">
+                Already have an account? <a class="btn btn-link text-dark py-0" href="Users/Login">Login</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+@code {
+    private IEnumerable<IdentityError>? identityErrors;
+
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    string Role = "Donor";
+
+    private string? Message => identityErrors is null ? null : $"Error: {string.Join(", ", identityErrors.Select(error => error.Description))}";
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        var user = CreateUser();
+
+        await UserStore.SetUserNameAsync(user, Input.Email, CancellationToken.None);
+        var emailStore = GetEmailStore();
+        await emailStore.SetEmailAsync(user, Input.Email, CancellationToken.None);
+        var result = await UserManager.CreateAsync(user, Input.Password);
+
+        if (!result.Succeeded)
+        {
+            identityErrors = result.Errors;
+            return;
+        }
+
+        Logger.LogInformation("User created a new account with password.");
+        await UserManager.AddToRoleAsync(user, Role);
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        var code = await UserManager.GenerateEmailConfirmationTokenAsync(user);
+        code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+        var callbackUrl = NavigationManager.GetUriWithQueryParameters(
+            NavigationManager.ToAbsoluteUri("Users/ConfirmEmail").AbsoluteUri,
+            new Dictionary<string, object?> { ["userId"] = userId, ["code"] = code, ["returnUrl"] = ReturnUrl });
+
+        await EmailSender.SendConfirmationLinkAsync(user, Input.Email, HtmlEncoder.Default.Encode(callbackUrl));
+
+        if (UserManager.Options.SignIn.RequireConfirmedAccount)
+        {
+            RedirectManager.RedirectTo(
+                "Users/RegisterConfirmation",
+                new() { ["email"] = Input.Email, ["returnUrl"] = ReturnUrl });
+        }
+
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        RedirectManager.RedirectTo(ReturnUrl);
+    }
+
+    private AppUser CreateUser()
+    {
+        try
+        {
+            return Activator.CreateInstance<AppUser>();
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Can't create an instance of '{nameof(AppUser)}'. " +
+                $"Ensure that '{nameof(AppUser)}' is not an abstract class and has a parameterless constructor.");
+        }
+    }
+
+    private IUserEmailStore<AppUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException("The default UI requires a user store with email support.");
+        }
+        return (IUserEmailStore<AppUser>)UserStore;
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+
+        [Phone]
+        [Display(Name = "Phone Number")]
+        public string PhoneNumber { get; set; } = "";
+
+        [MaxLength(50)]
+        public string Name { get; set; } = string.Empty;
+
+        [MaxLength(200)]
+        public string Address { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(100, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm password")]
+        [Compare("Password", ErrorMessage = "The password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

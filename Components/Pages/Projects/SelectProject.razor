@@ -1,0 +1,32 @@
+﻿@using Donate.Data.Entities
+@using Microsoft.AspNetCore.Identity
+@using System.Diagnostics.CodeAnalysis
+@inherits InputSelect<int>
+
+<InputSelect TValue="int" Value="@Value" ValueExpression="@(() => Value)" ValueChanged="OnValueChanged" class="@(IsValid ? "form-select valid" : "form-select invalid")">
+    @foreach (var project in Projects.OrderBy(x => x.Title))
+    {
+        <option value="@(project.Id)">@project.Title</option>
+    }
+</InputSelect>
+@code {
+    Project[] Projects = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        Projects = await db.Projects.Where(x => x.Active == true && (!x.EndDate.HasValue || x.EndDate.Value.Date >= DateTime.UtcNow.Date)).ToArrayAsync();
+        
+        if (Value == 0)
+            await OnValueChanged(Projects.FirstOrDefault()?.Id ?? 0);
+    }
+
+    private bool IsValid => !EditContext.GetValidationMessages(FieldIdentifier).Any();
+
+    async Task OnValueChanged(int value)
+    {
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+        EditContext.NotifyFieldChanged(FieldIdentifier);
+    }
+}

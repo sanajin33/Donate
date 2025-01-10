@@ -1,0 +1,156 @@
+﻿@page "/Donations/Items"
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+@inject IJSRuntime JS
+
+@attribute [Authorize(Roles = "Admin")]
+
+<div class="header mb-3">
+    <h1 class="header-title">Donation Items list</h1>
+    <div class="header-btns">
+        <button class="btn btn-link me-1" @onclick="OnStateChanged">
+            @if (showDisactive)
+            {
+                <span class="text-success"><i class="fa-solid fa-eye fa-xl"></i></span>
+            }
+            else
+            {
+                <span class="text-muted"><i class="fa-solid fa-eye-slash fa-xl"></i></span>
+            }
+        </button>
+        <button class="btn btn-primary me-1" @onclick="Refresh"><i class="fa-solid fa-rotate"></i></button>
+        <button class="btn btn-success" @onclick="Create"><i class="fa-solid fa-plus"></i></button>
+    </div>
+</div>
+
+<RadzenDataGrid @ref="DG" AllowFiltering="true" AllowAlternatingRows="true" FilterMode="FilterMode.Simple" AllowSorting="true" PageSize="20" AllowPaging="true" PagerHorizontalAlign="HorizontalAlign.Center" ShowPagingSummary="true"
+                Data="@projects" @bind-Value=@selectedProjects LoadData="LoadData" IsLoading="isLoading" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive" Count="@count" ColumnWidth="300px" LogicalFilterOperator="LogicalFilterOperator.Or" SelectionMode="DataGridSelectionMode.Single">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(ViewDonationItem.Project)" Title="Project" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewDonationItem.ItemType)" Title="Item Type" Width="auto" TextAlign="TextAlign.Start" />
+        <RadzenDataGridColumn Property="@nameof(ViewDonationItem.ItemName)" Title="Name" Width="auto" TextAlign="TextAlign.Center" />
+        <RadzenDataGridColumn Filterable="false" Sortable="false" Width="auto" TextAlign="TextAlign.Right">
+            <Template Context="task">
+                <AuthorizeView Roles="Admin">
+                    <Authorized>
+                        <div Class="text-nowrap text-right">
+                            @if (task.Active == true)
+                            {
+                                <button class="btn btn-link text-primary btn-sm small px-1 py-0 me-2" @onclick="@(async() => await Update(task))" title="Update"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button class="btn btn-link text-muted btn-sm px-1 py-0 small" @onclick="@(async() => await DisActive(task))" title="Disactive"><i class="fa-regular fa-square"></i></button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-link text-success btn-sm px-1 py-0 small" @onclick="@(async() => await Active(task))" title="Active"><i class="fa-regular fa-square-check"></i></button>
+                            }
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    [CascadingParameter] public IModalService Modal { get; set; } = default!;
+    List<ViewDonationItem> projects = [];
+    IList<ViewDonationItem> selectedProjects = [];
+    private ClaimsPrincipal CurUser = default!;
+    private RadzenDataGrid<ViewDonationItem> DG = default!;
+    bool isLoading;
+    int count;
+    bool showDisactive;
+
+    override protected async Task OnInitializedAsync()
+    {
+        await base.OnInitializedAsync();
+
+        var auth = await Auth.GetAuthenticationStateAsync();
+        CurUser = auth.User;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            await DG.Reload();
+    }
+
+    async Task LoadData(LoadDataArgs args)
+    {
+        isLoading = true;
+
+        await Task.Yield();
+
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var query = db.ViewDonationItems.Where(x => showDisactive || x.Active == true).AsQueryable();
+
+        if (!string.IsNullOrEmpty(args.Filter))
+            query = query.Where(args.Filter);
+
+        if (!string.IsNullOrEmpty(args.OrderBy))
+            query = query.OrderBy(args.OrderBy);
+
+        count = query.Count();
+
+        projects = query.Skip(args.Skip!.Value).Take(args.Top!.Value).ToList();
+
+        isLoading = false;
+    }
+
+    async Task Refresh() => await DG.Reload();
+
+    async Task Create()
+    {
+        var modal = Modal.Show<DonationItemModal>("New donation item", new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            ToastSrv.ShowSuccess($"A new task has added.");
+            await Refresh();
+        }
+    }
+
+    async Task Update(ViewDonationItem item)
+    {
+        var parameters = new ModalParameters() { { nameof(DonationItemModal.Item), new ViewDonationItem { Id = item.Id } } };
+        var modal = Modal.Show<DonationItemModal>("Update donation item", parameters, new ModalOptions { DisableBackgroundCancel = false, Size = ModalSize.Large, });
+        var result = await modal.Result;
+        if (!result.Cancelled)
+        {
+            if (result.Data?.ToString() == "NotFound")
+                ToastSrv.ShowInfo("This task is not found.");
+
+            ToastSrv.ShowSuccess($"This task has updated.");
+            await Refresh();
+        }
+    }
+
+    async Task DisActive(ViewDonationItem project) => await UserActive(project, false);
+    async Task Active(ViewDonationItem project) => await UserActive(project, true);
+
+    async Task UserActive(ViewDonationItem project, bool state)
+    {
+        using var db = await ContextFactory.CreateDbContextAsync();
+        var userInDb = await db.Tasks.FirstOrDefaultAsync(x => x.Id == project.Id);
+        if (userInDb == null)
+            ToastSrv.ShowInfo("This task is not found.");
+        else
+        {
+            userInDb.Active = state;
+            db.Tasks.Update(userInDb);
+            await db.SaveChangesAsync();
+            ToastSrv.ShowSuccess($"This task has {(state ? "activated" : "disactivated")}.");
+        }
+
+        await Refresh();
+    }
+
+    async Task OnStateChanged()
+    {
+        showDisactive = !showDisactive;
+        await DG.Reload();
+    }
+}
