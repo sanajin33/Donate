@@ -1,4 +1,5 @@
-﻿@using Donate.Components.Pages.Users
+﻿
+@using Donate.Components.Pages.Users
 @using Donate.Data.Models
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.WebUtilities
@@ -11,12 +12,21 @@
 <EditForm Model="_Project" OnvalidSubmit="OnSave">
     <DataAnnotationsValidator />
     <FormValidation @ref="FormValidation" />
+    <div class="mb-3">
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                @_errorMessage
+                <button type="button" class="btn-close" @onclick="@(() => _errorMessage = null)" aria-label="Close"></button>
+            </div>
+        }
+    </div>
 
     <div class="row mb-3">
         <div class="col-12 col-md-6">
             <label for="Input.Organization" class="mb-2 text-muted">Organization</label>
             <SelectOrganization @bind-Value="_Project.OrganizationId" ID="Input.Organization" />
-            <ValidationMessage For="@(() => _Project.OrganizationId)"/>
+            <ValidationMessage For="@(() => _Project.OrganizationId)" />
         </div>
 
         <div class="col-12 col-md-6">
@@ -56,6 +66,8 @@
     [CascadingParameter] public BlazoredModalInstance ModalInstance { get; set; } = default!;
     private Project _Project = new();
     FormValidation FormValidation = default!;
+    private string? _errorMessage;
+
 
     protected override async void OnInitialized()
     {
@@ -83,6 +95,7 @@
     {
         var errors = new Dictionary<string, List<string>>();
         FormValidation.ClearErrors();
+        _errorMessage = null;
 
         using var db = await ContextFactory.CreateDbContextAsync();
 
@@ -126,9 +139,29 @@
                 }
             }
         }
-        catch (Exception ex)
+        catch (DbUpdateException ex)
         {
-            ToastSrv.ShowError(ex.Message);
+            var pgEx = ex.InnerException as Npgsql.PostgresException;
+            if (pgEx != null)
+            {
+                _errorMessage = pgEx.MessageText switch
+                {
+                    var msg when msg.Contains("end date must be after the start date")
+                        => "Bitiş tarihi başlangıç tarihinden sonra olmalıdır.",
+
+                    var msg when msg.Contains("Proje açıklaması en az 10 karakter olmalıdır")
+                        => "Proje açıklaması çok kısa. Lütfen daha detaylı bir açıklama giriniz.",
+
+                    var msg when msg.Contains("aynı başlıkta başka bir proje zaten var")
+                        => "Bu organizasyonda aynı isimde başka bir proje bulunmaktadır.",
+
+                    var msg when msg.Contains("tarihi geçmişte olamaz")
+                        => "Proje tarihleri gelecekte olmalıdır.",
+
+                    _ => "Proje kaydedilirken bir hata oluştu."
+                };
+            }
+            StateHasChanged();
         }
     }
 

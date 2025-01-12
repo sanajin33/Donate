@@ -1,3 +1,4 @@
+using System.Reflection.Emit;
 using Donate.Data.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -39,6 +40,8 @@ public class DonateDbContext(DbContextOptions<DonateDbContext> options) : Identi
         builder.Entity<IdentityRoleClaim<int>>().ToTable("RoleClaims");
         builder.Entity<IdentityUserLogin<int>>().ToTable("UserLogins");
         builder.Entity<IdentityUserToken<int>>().ToTable("UserTokens");
+        builder.Entity<DonationDetailRecord>().HasNoKey();
+
 
         //builder.Entity<Project>().HasMany(x => x.Tasks).WithOne(x => x.Project).HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
 

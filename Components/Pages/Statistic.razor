@@ -1,0 +1,552 @@
+﻿@page "/Statistic"
+@using Donate.Data.Models
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using System.Linq.Dynamic.Core
+@inject IJSRuntime JS
+@inject DonateDbContext DbContext
+@using System.ComponentModel.DataAnnotations
+
+
+@attribute [Authorize(Roles = "Admin")]
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <h3 class="mb-4 mt-5">Minimum Aktiviteli Kullanıcılar</h3>
+            <div class="card">
+                <div class="card-body">
+                    <EditForm Model="@activitySearchModel" OnValidSubmit="@SearchUserActivities">
+                        <DataAnnotationsValidator />
+                        <div class="form-group mb-3">
+                            <label for="minActivityCount">Minimum Aktivite Sayısı:</label>
+                            <InputNumber id="minActivityCount" class="form-control" @bind-Value="activitySearchModel.MinActivityCount" />
+                            <ValidationMessage For="@(() => activitySearchModel.MinActivityCount)" />
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@isLoadingActivities">
+                            @if (isLoadingActivities)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                <span class="ms-2">Yükleniyor...</span>
+                            }
+                            else
+                            {
+                                <span>Aktiviteleri Getir</span>
+                            }
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+
+            @if (activitiesError != null)
+            {
+                <div class="alert alert-danger mt-4" role="alert">
+                    @activitiesError
+                </div>
+            }
+
+            @if (userActivities != null && userActivities.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <h5>Kullanıcı Aktiviteleri</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Kullanıcı ID</th>
+                                        <th>Aktivite Tipi</th>
+                                        <th>Aktivite Tarihi</th>
+                                        <th>Toplam Aktivite</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var activity in userActivities)
+                                    {
+                                        <tr>
+                                            <td>@activity.UserId</td>
+                                            <td>@activity.ActivityType</td>
+                                            <td>@activity.ActivityDate.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td>@activity.ActivityCount</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (!isLoadingActivities && userActivities != null)
+            {
+                <div class="alert alert-info mt-4">
+                    Bu kriterlere uygun kullanıcı bulunamadı.
+                </div>
+            }
+
+            <h3 class="mb-4">Bağışçı Bağış Sorgulama</h3>
+            <div class="card">
+                <div class="card-body">
+                    <EditForm Model="@searchModel" OnValidSubmit="@SearchDonations">
+                        <DataAnnotationsValidator />
+                        <div class="form-group mb-3">
+                            <label for="donorId">Bağışçı ID:</label>
+                            <InputNumber id="donorId" class="form-control" @bind-Value="searchModel.DonorId" />
+                            <ValidationMessage For="@(() => searchModel.DonorId)" />
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@isLoading">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                <span class="ms-2">Yükleniyor...</span>
+                            }
+                            else
+                            {
+                                <span>Bağışları Getir</span>
+                            }
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+
+            @if (errorMessage != null)
+            {
+                <div class="alert alert-danger mt-4" role="alert">
+                    @errorMessage
+                </div>
+            }
+
+            @if (donationDetails != null && donationDetails.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <h5>Bağış Detayları</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Bağış ID</th>
+                                        <th>Tarih</th>
+                                        <th>Ürün</th>
+                                        <th>Miktar</th>
+                                        <th>Birim Fiyat</th>
+                                        <th>Toplam Değer</th>
+                                        <th>Notlar</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var detail in donationDetails)
+                                    {
+                                        <tr>
+                                            <td>@detail.DonationId</td>
+                                            <td>@detail.DonationDate.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                            <td>@detail.ItemName</td>
+                                            <td>@detail.ItemQuantity</td>
+                                            <td>@detail.ItemPrice.ToString("C2")</td>
+                                            <td>@((detail.ItemPrice * detail.ItemQuantity).ToString("C2"))</td>
+                                            <td>@(string.IsNullOrEmpty(detail.Notes) ? "-" : detail.Notes)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                                <tfoot>
+                                    <tr>
+                                        <td colspan="5" class="text-end"><strong>Toplam:</strong></td>
+                                        <td colspan="2">
+                                            <strong>
+                                                @donationDetails.Sum(d => d.ItemPrice * d.ItemQuantity).ToString("C2")
+                                            </strong>
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (!isLoading && donationDetails != null)
+            {
+                <div class="alert alert-info mt-4">
+                    Bu bağışçı için kayıt bulunamadı.
+                </div>
+            }
+
+            <!-- New Organization Projects Section -->
+            <h3 class="mb-4 mt-5">Organizasyon Projeleri</h3>
+            <div class="card">
+                <div class="card-body">
+                    <EditForm Model="@orgSearchModel" OnValidSubmit="@SearchOrganizationProjects">
+                        <DataAnnotationsValidator />
+                        <div class="form-group mb-3">
+                            <label for="orgId">Organizasyon ID:</label>
+                            <InputNumber id="orgId" class="form-control" @bind-Value="orgSearchModel.OrganizationId" />
+                            <ValidationMessage For="@(() => orgSearchModel.OrganizationId)" />
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@isLoadingProjects">
+                            @if (isLoadingProjects)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                <span class="ms-2">Yükleniyor...</span>
+                            }
+                            else
+                            {
+                                <span>Projeleri Getir</span>
+                            }
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+
+            @if (projectsError != null)
+            {
+                <div class="alert alert-danger mt-4" role="alert">
+                    @projectsError
+                </div>
+            }
+
+            @if (organizationProjects != null && organizationProjects.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <h5>Proje Listesi</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Proje ID</th>
+                                        <th>Başlık</th>
+                                        <th>Durum</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var project in organizationProjects)
+                                    {
+                                        <tr>
+                                            <td>@project.ProjectId</td>
+                                            <td>@project.Title</td>
+                                            <td>@project.Status</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- User Projects and Tasks Section -->
+            <h3 class="mb-4 mt-5">Gönüllü Projeleri ve Görevleri</h3>
+            <div class="card">
+                <div class="card-body">
+                    <EditForm Model="@userSearchModel" OnValidSubmit="@SearchUserProjectsAndTasks">
+                        <DataAnnotationsValidator />
+                        <div class="form-group mb-3">
+                            <label for="userId">Kullanıcı ID:</label>
+                            <InputNumber id="userId" class="form-control" @bind-Value="userSearchModel.UserId" />
+                            <ValidationMessage For="@(() => userSearchModel.UserId)" />
+                        </div>
+                        <button type="submit" class="btn btn-primary" disabled="@isLoadingUserTasks">
+                            @if (isLoadingUserTasks)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                                <span class="ms-2">Yükleniyor...</span>
+                            }
+                            else
+                            {
+                                <span>Görevleri Getir</span>
+                            }
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+
+            @if (userTasksError != null)
+            {
+                <div class="alert alert-danger mt-4" role="alert">
+                    @userTasksError
+                </div>
+            }
+
+            @if (userProjectTasks != null && userProjectTasks.Any())
+            {
+                <div class="card mt-4">
+                    <div class="card-body">
+                        <h5>Görev Listesi</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Proje</th>
+                                        <th>Görev Açıklaması</th>
+                                        <th>Tarih</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var task in userProjectTasks)
+                                    {
+                                        <tr>
+                                            <td>@task.ProjectTitle</td>
+                                            <td>@task.TaskDescription</td>
+                                            <td>@task.TaskDate.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+@code {
+    private SearchModel searchModel = new();
+    private List<DonationDetailRecord> donationDetails;
+    private bool isLoading;
+    private string errorMessage;
+
+    private class SearchModel
+    {
+        [Required(ErrorMessage = "Bağışçı ID gereklidir.")]
+        [Range(1, int.MaxValue, ErrorMessage = "Geçerli bir Bağışçı ID giriniz.")]
+        public int DonorId { get; set; }
+    }
+    private ActivitySearchModel activitySearchModel = new();
+    private List<UserActivityRecord> userActivities;
+    private bool isLoadingActivities;
+    private string activitiesError;
+
+    private record UserActivityRecord
+    {
+        public int UserId { get; init; }
+        public string ActivityType { get; init; }
+        public DateTime ActivityDate { get; init; }
+        public int ActivityCount { get; init; }
+    }
+
+    private class ActivitySearchModel
+    {
+        [Required(ErrorMessage = "Minimum aktivite sayısı gereklidir.")]
+        [Range(1, int.MaxValue, ErrorMessage = "Geçerli bir aktivite sayısı giriniz.")]
+        public int MinActivityCount { get; set; } = 5;
+    }
+    private async Task SearchUserActivities()
+    {
+        try
+        {
+            isLoadingActivities = true;
+            activitiesError = null;
+
+            var command = DbContext.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT * FROM public.get_users_with_min_activities(@minCount)";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@minCount";
+            parameter.Value = activitySearchModel.MinActivityCount;
+            command.Parameters.Add(parameter);
+
+            await DbContext.Database.OpenConnectionAsync();
+
+            userActivities = new List<UserActivityRecord>();
+
+            using (var result = await command.ExecuteReaderAsync())
+            {
+                while (await result.ReadAsync())
+                {
+                    userActivities.Add(new UserActivityRecord
+                        {
+                            UserId = result.GetInt32(0),
+                            ActivityType = result.GetString(1),
+                            ActivityDate = result.GetDateTime(2),
+                            ActivityCount = result.GetInt32(3)
+                        });
+                }
+            }
+
+            if (!userActivities.Any())
+            {
+                activitiesError = "Bu kriterlere uygun kullanıcı bulunamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            activitiesError = $"Hata oluştu: {ex.Message}";
+            userActivities = new List<UserActivityRecord>();
+        }
+        finally
+        {
+            await DbContext.Database.CloseConnectionAsync();
+            isLoadingActivities = false;
+        }
+    }
+
+    private async Task SearchDonations()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+
+            var result = await DbContext.Set<DonationDetailRecord>()
+                .FromSqlRaw(@"
+                SELECT
+                    donation_id as ""DonationId"",
+                    donation_date as ""DonationDate"",
+                    item_name as ""ItemName"",
+                    item_quantity as ""ItemQuantity"",
+                    item_price as ""ItemPrice"",
+                    total_value as ""TotalValue"",
+                    notes as ""Notes""
+                FROM public.get_donor_donations({0})",
+                    searchModel.DonorId)
+                .ToListAsync();
+
+            donationDetails = result;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Hata oluştu: {ex.Message}";
+            donationDetails = null;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }// New models and properties for organization projects
+    private OrgSearchModel orgSearchModel = new();
+    private List<ProjectRecord> organizationProjects;
+    private bool isLoadingProjects;
+    private string projectsError;
+
+    private class OrgSearchModel
+    {
+        [Required(ErrorMessage = "Organizasyon ID gereklidir.")]
+        [Range(1, int.MaxValue, ErrorMessage = "Geçerli bir Organizasyon ID giriniz.")]
+        public int OrganizationId { get; set; }
+    }
+
+    private class ProjectRecord
+    {
+        public int ProjectId { get; set; }
+        public string Title { get; set; }
+        public string Status { get; set; }
+    }
+
+    // New models and properties for user projects and tasks
+    private UserSearchModel userSearchModel = new();
+    private List<UserProjectTaskRecord> userProjectTasks;
+    private bool isLoadingUserTasks;
+    private string userTasksError;
+
+    private class UserSearchModel
+    {
+        [Required(ErrorMessage = "Kullanıcı ID gereklidir.")]
+        [Range(1, int.MaxValue, ErrorMessage = "Geçerli bir Kullanıcı ID giriniz.")]
+        public int UserId { get; set; }
+    }
+
+    private class UserProjectTaskRecord
+    {
+        public string ProjectTitle { get; set; }
+        public string TaskDescription { get; set; }
+        public DateTime TaskDate { get; set; }
+    }
+    // ProjectRecord için SearchOrganizationProjects fonksiyonu
+    private async Task SearchOrganizationProjects()
+    {
+        try
+        {
+            isLoadingProjects = true;
+            projectsError = null;
+
+            var command = DbContext.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT * FROM list_projects_by_organization(@orgId)";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@orgId";
+            parameter.Value = orgSearchModel.OrganizationId;
+            command.Parameters.Add(parameter);
+
+            await DbContext.Database.OpenConnectionAsync();
+
+            organizationProjects = new List<ProjectRecord>();
+
+            using (var result = await command.ExecuteReaderAsync())
+            {
+                while (await result.ReadAsync())
+                {
+                    organizationProjects.Add(new ProjectRecord
+                        {
+                            ProjectId = result.IsDBNull(0) ? 0 : result.GetInt32(0),
+                            Title = result.IsDBNull(1) ? string.Empty : result.GetString(1),
+                            Status = result.IsDBNull(2) ? "-" : result.GetString(2)
+                        });
+                }
+            }
+
+            if (!organizationProjects.Any())
+            {
+                projectsError = "Bu organizasyon için proje bulunamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            projectsError = $"Hata oluştu: {ex.Message}";
+            organizationProjects = new List<ProjectRecord>();
+        }
+        finally
+        {
+            await DbContext.Database.CloseConnectionAsync();
+            isLoadingProjects = false;
+        }
+    }
+
+    // UserProjectTaskRecord için SearchUserProjectsAndTasks fonksiyonu
+    private async Task SearchUserProjectsAndTasks()
+    {
+        try
+        {
+            isLoadingUserTasks = true;
+            userTasksError = null;
+
+            var command = DbContext.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "SELECT * FROM public.get_user_projects_and_tasks(@userId)";
+
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@userId";
+            parameter.Value = userSearchModel.UserId;
+            command.Parameters.Add(parameter);
+
+            await DbContext.Database.OpenConnectionAsync();
+
+            userProjectTasks = new List<UserProjectTaskRecord>();
+
+            using (var result = await command.ExecuteReaderAsync())
+            {
+                while (await result.ReadAsync())
+                {
+                    userProjectTasks.Add(new UserProjectTaskRecord
+                        {
+                            ProjectTitle = result.IsDBNull(0) ? string.Empty : result.GetString(0),
+                            TaskDescription = result.IsDBNull(1) ? string.Empty : result.GetString(1),
+                            TaskDate = result.IsDBNull(2) ? DateTime.MinValue : result.GetDateTime(2)
+                        });
+                }
+            }
+
+            if (!userProjectTasks.Any())
+            {
+                userTasksError = "Bu kullanıcı için görev bulunamadı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            userTasksError = $"Hata oluştu: {ex.Message}";
+            userProjectTasks = new List<UserProjectTaskRecord>();
+        }
+        finally
+        {
+            await DbContext.Database.CloseConnectionAsync();
+            isLoadingUserTasks = false;
+        }
+    }
+
+}
